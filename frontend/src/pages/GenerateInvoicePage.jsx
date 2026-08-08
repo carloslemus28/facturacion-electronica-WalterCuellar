@@ -1018,7 +1018,7 @@ function GenerateInvoicePage() {
       if (invoice?.id) {
         setGeneratedInvoice(invoice);
         editLoadedRef.current = false;
-        navigate(`/generate?edit=${invoice.id}`, { replace: true });
+        navigate(`/invoices/generate?edit=${invoice.id}`, { replace: true });
       }
 
       await loadData();
@@ -1056,7 +1056,7 @@ function GenerateInvoicePage() {
       resetForm();
       editLoadedRef.current = false;
       originalEditProductQuantitiesRef.current = {};
-      navigate('/generate', { replace: true });
+      navigate('/invoices/generate', { replace: true });
       await loadData();
     } catch (error) {
       console.error('Error transmitiendo DTE desde Generar DTE:', error);

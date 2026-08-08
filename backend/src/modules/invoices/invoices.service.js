@@ -804,6 +804,47 @@ const buildInvoiceVisibilityInclude = (user) => {
 };
 
 
+const getVisiblePointOfSaleIdsForUser = async (user) => {
+  if (isAdminUser(user)) {
+    return null;
+  }
+
+  const establishmentId = getUserEstablishmentId(user);
+
+  if (!establishmentId) {
+    const error = new Error('El usuario no tiene establecimiento o sucursal asignada');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const pointsOfSale = await PointOfSale.findAll({
+    attributes: ['id'],
+    where: {
+      establishmentId
+    },
+    raw: true
+  });
+
+  return pointsOfSale.map((pointOfSale) => pointOfSale.id);
+};
+
+const buildScopedInvoiceWhere = async (user, baseWhere = {}) => {
+  const where = {
+    ...baseWhere,
+    companyId: user.company.id
+  };
+
+  const pointOfSaleIds = await getVisiblePointOfSaleIdsForUser(user);
+
+  if (Array.isArray(pointOfSaleIds)) {
+    where.pointOfSaleId = {
+      [Op.in]: pointOfSaleIds
+    };
+  }
+
+  return where;
+};
+
 const INVOICE_LIST_ATTRIBUTES = [
   'id',
   'companyId',
@@ -1532,22 +1573,23 @@ const listInvoices = async ({ user, startDate, endDate }) => {
     throw error;
   }
 
+  const where = await buildScopedInvoiceWhere(currentUser, {
+    issuedAt: getIssuedAtRangeForList({
+      startDate,
+      endDate
+    })
+  });
+
   const invoices = await Invoice.findAll({
     attributes: INVOICE_LIST_ATTRIBUTES,
-    where: {
-      companyId: currentUser.company.id,
-      issuedAt: getIssuedAtRangeForList({
-        startDate,
-        endDate
-      })
-    },
+    where,
     include: [
       {
         model: Customer,
         as: 'customer',
         attributes: CUSTOMER_LIST_ATTRIBUTES
       },
-      buildInvoiceVisibilityInclude(currentUser),
+      buildPointOfSaleInclude(),
       {
         model: User,
         as: 'user',
@@ -1555,10 +1597,10 @@ const listInvoices = async ({ user, startDate, endDate }) => {
       }
     ],
     order: [
-  ['documentTypeCode', 'ASC'],
-  [literal("CAST(SUBSTRING_INDEX(`Invoice`.`control_number`, '-', -1) AS UNSIGNED)"), 'DESC'],
-  ['id', 'DESC']
-]
+      ['documentTypeCode', 'ASC'],
+      [literal("CAST(SUBSTRING_INDEX(`Invoice`.`control_number`, '-', -1) AS UNSIGNED)"), 'DESC'],
+      ['id', 'DESC']
+    ]
   });
 
   await attachReturnEventsToInvoices(invoices);
@@ -1625,25 +1667,35 @@ const getDashboardSummary = async ({ user }) => {
     throw error;
   }
 
-  const invoices = await Invoice.findAll({
+  const where = await buildScopedInvoiceWhere(currentUser, {
+    issuedAt: getCurrentMonthIssuedAtRange()
+  });
+
+  const summaryRows = await Invoice.findAll({
+    attributes: ['id', 'status', 'total'],
+    where,
+    raw: true
+  });
+
+  const recentInvoices = await Invoice.findAll({
     attributes: INVOICE_LIST_ATTRIBUTES,
-    where: {
-      companyId: currentUser.company.id,
-      issuedAt: getCurrentMonthIssuedAtRange()
-    },
+    where,
     include: [
       {
         model: Customer,
         as: 'customer',
         attributes: CUSTOMER_LIST_ATTRIBUTES
       },
-      buildInvoiceVisibilityInclude(currentUser)
+      buildPointOfSaleInclude()
     ],
-    order: [['issuedAt', 'DESC']]
+    order: [['issuedAt', 'DESC']],
+    limit: 5
   });
 
+  await attachReturnEventsToInvoices(recentInvoices);
+
   const summary = {
-    totalDocuments: invoices.length,
+    totalDocuments: summaryRows.length,
     generated: 0,
     signed: 0,
     transmitted: 0,
@@ -1653,10 +1705,10 @@ const getDashboardSummary = async ({ user }) => {
     totalAmount: 0,
     generatedAmount: 0,
     acceptedAmount: 0,
-    recentInvoices: invoices.slice(0, 5)
+    recentInvoices
   };
 
-  for (const invoice of invoices) {
+  for (const invoice of summaryRows) {
     const total = Number(invoice.total || 0);
 
     summary.totalAmount += total;
@@ -1700,20 +1752,21 @@ const listAvailableDocumentsForCreditNote = async ({ user }) => {
     throw error;
   }
 
+  const where = await buildScopedInvoiceWhere(currentUser, {
+    documentTypeCode: '03',
+    status: 'ACEPTADO'
+  });
+
   const invoices = await Invoice.findAll({
     attributes: INVOICE_LIST_ATTRIBUTES,
-    where: {
-      companyId: currentUser.company.id,
-      documentTypeCode: '03',
-      status: 'ACEPTADO'
-    },
+    where,
     include: [
       {
         model: Customer,
         as: 'customer',
         attributes: CUSTOMER_LIST_ATTRIBUTES
       },
-      buildInvoiceVisibilityInclude(currentUser),
+      buildPointOfSaleInclude(),
       {
         model: User,
         as: 'user',

@@ -66,6 +66,10 @@ const createTransporter = () => {
     port: config.port,
     secure: config.secure,
     auth: config.auth,
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
+    pool: false,
     tls: {
       rejectUnauthorized: false
     }
@@ -369,9 +373,11 @@ const sendInvoiceEmail = async ({ id, user, to, subject, message }) => {
     user
   });
 
+  let transporter = null;
+
   try {
     const smtpConfig = getSmtpConfig();
-    const transporter = createTransporter();
+    transporter = createTransporter();
 
     const mailOptions = {
       from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
@@ -425,6 +431,10 @@ const sendInvoiceEmail = async ({ id, user, to, subject, message }) => {
     const nextError = new Error(`No se pudo enviar el correo: ${error.message}`);
     nextError.statusCode = error.statusCode || 500;
     throw nextError;
+  } finally {
+    if (transporter && typeof transporter.close === 'function') {
+      transporter.close();
+    }
   }
 };
 

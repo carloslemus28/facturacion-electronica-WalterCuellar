@@ -8,6 +8,34 @@ const ensureRuntimeSchema = require('./config/runtime-schema');
 
 const PORT = process.env.PORT || process.env.BACKEND_PORT || 4000;
 
+let httpServer = null;
+let isShuttingDown = false;
+
+const shutdown = async (signal) => {
+  if (isShuttingDown) return;
+
+  isShuttingDown = true;
+  console.log(`Cerrando backend por ${signal}...`);
+
+  try {
+    if (httpServer) {
+      await new Promise((resolve) => {
+        httpServer.close(() => resolve());
+      });
+    }
+
+    await sequelize.close();
+    console.log('Conexiones MySQL cerradas correctamente');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error cerrando el backend:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 const startServer = async () => {
   await testConnection();
 
@@ -19,7 +47,7 @@ const startServer = async () => {
 
   await seedSecurityData();
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Backend ejecutándose en el puerto ${PORT}`);
   });
 };
